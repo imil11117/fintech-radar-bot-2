@@ -180,6 +180,124 @@ class ProductHuntClient:
             print(f"Error fetching recent posts: {str(e)}")
             return []
 
+    def get_posts_since(self, posted_after_iso: str, limit: int = 100) -> List[Dict]:
+        """
+        Get posts from Product Hunt posted after a specific date.
+        
+        Args:
+            posted_after_iso: ISO date string (e.g., "2024-01-01T00:00:00Z")
+            limit: Maximum number of posts to fetch (default: 100)
+            
+        Returns:
+            List of normalized post dictionaries
+        """
+        query = """
+        query ($after: DateTime!, $limit: Int!) {
+            posts(postedAfter: $after, first: $limit) {
+                edges {
+                    node {
+                        id
+                        name
+                        tagline
+                        description
+                        votesCount
+                        commentsCount
+                        slug
+                        website
+                        url
+                        createdAt
+                        topics(first: 10) { edges { node { name slug } } }
+                        thumbnail { url }
+                        media { url type videoUrl }
+                        makers { name username }
+                        productLinks { type url }
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            data = self._make_request(query, {
+                "after": posted_after_iso,
+                "limit": limit
+            })
+            
+            posts_data = data.get("data", {}).get("posts", {}).get("edges", [])
+            
+            # Normalize each post
+            normalized_posts = []
+            for edge in posts_data:
+                if edge.get("node"):
+                    normalized_post = self._normalize_post_data(edge["node"])
+                    normalized_posts.append(normalized_post)
+            
+            return normalized_posts
+            
+        except (ValueError, ConnectionError) as e:
+            print(f"Error fetching posts since {posted_after_iso}: {str(e)}")
+            return []
+
+    def search_posts(self, query: str, limit: int = 30) -> List[Dict]:
+        """
+        Search for posts using Product Hunt search API.
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of posts to fetch (default: 30)
+            
+        Returns:
+            List of normalized post dictionaries
+        """
+        search_query = """
+        query ($q: String!, $limit: Int!) {
+            search(query: $q, first: $limit, type: POST) {
+                edges {
+                    node {
+                        ... on Post {
+                            id
+                            name
+                            tagline
+                            description
+                            votesCount
+                            commentsCount
+                            slug
+                            website
+                            url
+                            createdAt
+                            topics(first: 10) { edges { node { name slug } } }
+                            thumbnail { url }
+                            media { url type videoUrl }
+                            makers { name username }
+                            productLinks { type url }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            data = self._make_request(search_query, {
+                "q": query,
+                "limit": limit
+            })
+            
+            posts_data = data.get("data", {}).get("search", {}).get("edges", [])
+            
+            # Normalize each post
+            normalized_posts = []
+            for edge in posts_data:
+                if edge.get("node"):
+                    normalized_post = self._normalize_post_data(edge["node"])
+                    normalized_posts.append(normalized_post)
+            
+            return normalized_posts
+            
+        except (ValueError, ConnectionError) as e:
+            print(f"Error searching for '{query}': {str(e)}")
+            return []
+
     def search_post_tophit(self, query: str) -> Optional[Dict]:
         """
         Search for a product and return the top hit.
