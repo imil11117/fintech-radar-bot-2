@@ -3,14 +3,14 @@ Main bot class for the Fintech Radar Bot.
 """
 
 import asyncio
-from typing import Optional
-from telegram import Bot
+from typing import Optional, Dict, List, Tuple
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
 from loguru import logger
 
 from .config import config
 from .data_collector import DataCollector
-from .message_formatter import MessageFormatter
+from .message_formatter import MessageFormatter, compose_article_ru
 
 
 class FintechRadarBot:
@@ -101,6 +101,70 @@ class FintechRadarBot:
             
         except TelegramError as e:
             logger.error(f"Failed to send test message: {e}")
+            return False
+    
+    async def send_article_to_telegram(self, post: Dict, dry_run: bool = False) -> bool:
+        """
+        Send a Product Hunt article to Telegram.
+        
+        Args:
+            post: Product Hunt post data dictionary
+            dry_run: If True, only print the article without sending to Telegram
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Compose the article
+            article_text, buttons, photo_url = compose_article_ru(post)
+            
+            if dry_run:
+                print("=" * 50)
+                print("DRY RUN - Article Preview:")
+                print("=" * 50)
+                print(article_text)
+                print("\n" + "=" * 50)
+                print("Buttons:")
+                for button_text, button_url in buttons:
+                    print(f"  {button_text}: {button_url}")
+                print("=" * 50)
+                if photo_url:
+                    print(f"Photo URL: {photo_url}")
+                return True
+            
+            # Create inline keyboard if buttons exist
+            keyboard = None
+            if buttons:
+                keyboard_buttons = []
+                for button_text, button_url in buttons:
+                    keyboard_buttons.append([InlineKeyboardButton(button_text, url=button_url)])
+                keyboard = InlineKeyboardMarkup(keyboard_buttons)
+            
+            # Send message with or without photo
+            if photo_url:
+                await self.bot.send_photo(
+                    chat_id=config.CHANNEL_ID,
+                    photo=photo_url,
+                    caption=article_text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            else:
+                await self.bot.send_message(
+                    chat_id=config.CHANNEL_ID,
+                    text=article_text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            
+            logger.info("Product Hunt article sent successfully")
+            return True
+            
+        except TelegramError as e:
+            logger.error(f"Telegram error while sending article: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error while sending article: {e}")
             return False
 
 
