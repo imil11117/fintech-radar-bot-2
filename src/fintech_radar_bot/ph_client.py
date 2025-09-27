@@ -68,7 +68,7 @@ class ProductHuntClient:
             slug: The product slug (e.g., "gusto")
             
         Returns:
-            Dict containing post data or None if not found
+            Dict containing normalized post data or None if not found
         """
         query = """
         query GetPostBySlug($slug: String!) {
@@ -83,7 +83,7 @@ class ProductHuntClient:
                 website
                 url
                 createdAt
-                topics {
+                topics(first: 10) {
                     edges {
                         node {
                             name
@@ -100,12 +100,8 @@ class ProductHuntClient:
                     videoUrl
                 }
                 makers {
-                    edges {
-                        node {
-                            name
-                            username
-                        }
-                    }
+                    name
+                    username
                 }
                 productLinks {
                     type
@@ -118,7 +114,9 @@ class ProductHuntClient:
         try:
             data = self._make_request(query, {"slug": slug})
             post = data.get("data", {}).get("post")
-            return post if post else None
+            if post:
+                return self._normalize_post_data(post)
+            return None
             
         except (ValueError, ConnectionError) as e:
             print(f"Error fetching post by slug '{slug}': {str(e)}")
@@ -127,73 +125,83 @@ class ProductHuntClient:
     def search_post_tophit(self, query: str) -> Optional[Dict]:
         """
         Search for a product and return the top hit.
+        Note: Product Hunt API doesn't support direct search via GraphQL.
+        This method attempts to find a post by treating the query as a slug.
         
         Args:
-            query: Search query string
+            query: Search query string (treated as slug)
             
         Returns:
-            Dict containing the top post data or None if not found
+            Dict containing normalized top post data or None if not found
         """
-        search_query = """
-        query SearchPosts($query: String!) {
-            posts(query: $query, first: 1) {
-                edges {
-                    node {
-                        id
-                        name
-                        tagline
-                        description
-                        votesCount
-                        commentsCount
-                        slug
-                        website
-                        url
-                        createdAt
-                        topics {
-                            edges {
-                                node {
-                                    name
-                                    slug
-                                }
-                            }
-                        }
-                        thumbnail {
-                            url
-                        }
-                        media {
-                            url
-                            type
-                            videoUrl
-                        }
-                        makers {
-                            edges {
-                                node {
-                                    name
-                                    username
-                                }
-                            }
-                        }
-                        productLinks {
-                            type
-                            url
-                        }
-                    }
-                }
-            }
-        }
-        """
-        
+        # Since Product Hunt GraphQL API doesn't support search queries,
+        # we'll try to find the post by treating the query as a slug
+        # This is a fallback approach
         try:
-            data = self._make_request(search_query, {"query": query})
-            edges = data.get("data", {}).get("posts", {}).get("edges", [])
-            
-            if edges:
-                return edges[0]["node"]
-            return None
+            # Try to get the post by slug (treating query as slug)
+            return self.get_post_by_slug(query)
             
         except (ValueError, ConnectionError) as e:
             print(f"Error searching for '{query}': {str(e)}")
             return None
+    
+    def _normalize_post_data(self, post: Dict) -> Dict:
+        """
+        Normalize post data to a flat structure.
+        
+        Args:
+            post: Raw post data from GraphQL response
+            
+        Returns:
+            Dict with normalized flat structure
+        """
+        # Extract topics (connection with edges)
+        topics = []
+        if post.get("topics", {}).get("edges"):
+            topics = [
+                edge["node"]["name"] 
+                for edge in post["topics"]["edges"] 
+                if edge.get("node")
+            ]
+        
+        # Extract makers (plain list)
+        makers = []
+        if post.get("makers"):
+            makers = [
+                maker.get("name") 
+                for maker in post["makers"] 
+                if maker and maker.get("name")
+            ]
+        
+        # Extract product links (plain list)
+        product_links = post.get("productLinks", []) or []
+        
+        # Extract thumbnail URL
+        thumbnail_url = None
+        if post.get("thumbnail", {}).get("url"):
+            thumbnail_url = post["thumbnail"]["url"]
+        
+        # Extract media (plain list)
+        media = post.get("media", []) or []
+        
+        # Return normalized flat structure
+        return {
+            "id": post.get("id"),
+            "name": post.get("name"),
+            "tagline": post.get("tagline"),
+            "description": post.get("description"),
+            "votesCount": post.get("votesCount"),
+            "commentsCount": post.get("commentsCount"),
+            "slug": post.get("slug"),
+            "website": post.get("website"),
+            "url": post.get("url"),
+            "createdAt": post.get("createdAt"),
+            "topics": topics,
+            "makers": makers,
+            "thumbnailUrl": thumbnail_url,
+            "media": media,
+            "productLinks": product_links
+        }
 
 
 def create_ph_client() -> ProductHuntClient:

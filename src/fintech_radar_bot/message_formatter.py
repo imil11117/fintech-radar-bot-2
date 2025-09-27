@@ -179,21 +179,18 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     except:
         formatted_date = "Unknown"
     
-    # Extract topics
-    topics = []
-    if post.get("topics", {}).get("edges"):
-        topics = [edge["node"]["name"] for edge in post["topics"]["edges"]]
+    # Extract topics (already normalized as flat list)
+    topics = post.get("topics", [])
     topics_joined = ", ".join(topics) if topics else "Не указаны"
     
-    # Extract makers
-    makers = []
-    if post.get("makers", {}).get("edges"):
-        makers = [edge["node"]["name"] for edge in post["makers"]["edges"]]
+    # Extract makers (already normalized as flat list)
+    makers = post.get("makers", [])
     makers_joined = ", ".join(makers) if makers else "Не указаны"
     
     # Create short description (first 200 characters)
-    short_ru_description = description[:200] + "..." if len(description) > 200 else description
-    if not short_ru_description:
+    if description:
+        short_ru_description = description[:200] + "..." if len(description) > 200 else description
+    else:
         short_ru_description = "Описание недоступно"
     
     # Extract features from description (simple approach - split by sentences)
@@ -201,6 +198,7 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     if description:
         sentences = [s.strip() for s in description.split('.') if s.strip()]
         features = sentences[:3]  # Take first 3 sentences as features
+    
     
     # Build the article
     article_parts = [
@@ -240,24 +238,24 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     if url:
         buttons.append(("Product Hunt", url))
     
-    # Product links buttons
-    if post.get("productLinks"):
-        for link in post["productLinks"]:
-            link_type = link.get("type", "")
-            link_url = link.get("url", "")
-            
-            if link_type == "DOCS" and link_url:
-                buttons.append(("Docs", link_url))
-            elif link_type == "PRICING" and link_url:
-                buttons.append(("Pricing", link_url))
+    # Product links buttons (already normalized as flat list)
+    product_links = post.get("productLinks", [])
+    for link in product_links:
+        link_type = link.get("type", "")
+        link_url = link.get("url", "")
+        
+        if link_type == "DOCS" and link_url:
+            buttons.append(("Docs", link_url))
+        elif link_type == "PRICING" and link_url:
+            buttons.append(("Pricing", link_url))
     
     # Extract photo URL
     photo_url = None
     
-    # Try thumbnail first
-    if post.get("thumbnail", {}).get("url"):
-        photo_url = post["thumbnail"]["url"]
-    # Fallback to first media image
+    # Try thumbnail first (already normalized as thumbnailUrl)
+    if post.get("thumbnailUrl"):
+        photo_url = post["thumbnailUrl"]
+    # Fallback to first media image (already normalized as flat list)
     elif post.get("media"):
         for media in post["media"]:
             if media.get("type") == "image" and media.get("url"):
