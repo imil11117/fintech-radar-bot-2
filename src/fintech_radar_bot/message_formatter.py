@@ -179,11 +179,11 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     except:
         formatted_date = "Unknown"
     
-    # Extract topics (already normalized as flat list)
+    # Extract topics (flat list of strings)
     topics = post.get("topics", [])
     topics_joined = ", ".join(topics) if topics else "Не указаны"
     
-    # Extract makers (already normalized as flat list)
+    # Extract makers (flat list of strings - maker names)
     makers = post.get("makers", [])
     makers_joined = ", ".join(makers) if makers else "Не указаны"
     
@@ -238,7 +238,7 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     if url:
         buttons.append(("Product Hunt", url))
     
-    # Product links buttons (already normalized as flat list)
+    # Product links buttons (flat list of link objects)
     product_links = post.get("productLinks", [])
     for link in product_links:
         link_type = link.get("type", "")
@@ -252,10 +252,10 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     # Extract photo URL
     photo_url = None
     
-    # Try thumbnail first (already normalized as thumbnailUrl)
+    # Try thumbnail first (normalized as thumbnailUrl field)
     if post.get("thumbnailUrl"):
         photo_url = post["thumbnailUrl"]
-    # Fallback to first media image (already normalized as flat list)
+    # Fallback to first media image (flat list of media objects)
     elif post.get("media"):
         for media in post["media"]:
             if media.get("type") == "image" and media.get("url"):
