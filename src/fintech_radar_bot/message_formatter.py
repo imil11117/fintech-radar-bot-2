@@ -180,16 +180,24 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
         formatted_date = "Unknown"
     
     # Extract topics (flat list of strings)
+    # Limit printed topics to 3-4
     topics = post.get("topics", [])
-    topics_joined = ", ".join(topics) if topics else "Не указаны"
+    if topics:
+        topics_limited = topics[:4]  # Limit to 4 topics
+        topics_joined = ", ".join(topics_limited)
+    else:
+        topics_joined = "Не указаны"
     
     # Extract makers (flat list of strings - maker names)
     makers = post.get("makers", [])
     makers_joined = ", ".join(makers) if makers else "Не указаны"
     
     # Create short description (first 200 characters)
+    # If description is empty -> fallback to tagline
     if description:
         short_ru_description = description[:200] + "..." if len(description) > 200 else description
+    elif tagline:
+        short_ru_description = tagline
     else:
         short_ru_description = "Описание недоступно"
     
@@ -221,9 +229,12 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
         "Соц. сигнал на Product Hunt:",
         f"👍 {votes:,}   💬 {comments:,}",
         f"🚀 Запуск: {formatted_date}",
-        "",
-        f"Мейкеры: {makers_joined}"
+        ""
     ]
+    
+    # If makers empty -> omit the makers line
+    if makers:
+        article_parts.append(f"Мейкеры: {makers_joined}")
     
     article_text = "\n".join(article_parts)
     
@@ -250,6 +261,7 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
             buttons.append(("Pricing", link_url))
     
     # Extract photo URL
+    # Photo: prefer thumbnailUrl; else first media image; else send text only
     photo_url = None
     
     # Try thumbnail first (normalized as thumbnailUrl field)

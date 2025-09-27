@@ -15,6 +15,9 @@ APScheduler==3.10.4
 # Logging and monitoring
 loguru==0.7.2
 
+# Timezone handling
+pytz==2023.3
+
 # Development dependencies
 pytest==7.4.3
 pytest-asyncio==0.21.1
