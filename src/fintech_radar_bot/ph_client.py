@@ -238,65 +238,134 @@ class ProductHuntClient:
             print(f"Error fetching posts since {posted_after_iso}: {str(e)}")
             return []
 
-    def search_posts(self, query: str, limit: int = 30) -> List[Dict]:
+    def get_posts_since_paginated(self, posted_after_iso: str, limit: int = 60, page_size: int = 20) -> List[Dict]:
         """
-        Search for posts using Product Hunt search API.
+        Fetch posts posted after `posted_after_iso` (ISO DateTime in UTC) using Product Hunt GraphQL v2
+        with pagination (page_size per page) until `limit` or pages exhausted.
+        Normalize each node into a flat dict compatible with the rest of the code.
         
         Args:
-            query: Search query string
-            limit: Maximum number of posts to fetch (default: 30)
+            posted_after_iso: ISO date string (e.g., "2024-01-01T00:00:00Z")
+            limit: Maximum number of posts to fetch (default: 60)
+            page_size: Number of posts per page (default: 20)
             
         Returns:
             List of normalized post dictionaries
         """
-        search_query = """
-        query ($q: String!, $limit: Int!) {
-            search(query: $q, first: $limit, type: POST) {
+        query = """
+        query ($after: DateTime!, $first: Int!, $cursor: String) {
+            posts(postedAfter: $after, first: $first, after: $cursor) {
                 edges {
                     node {
-                        ... on Post {
-                            id
-                            name
-                            tagline
-                            description
-                            votesCount
-                            commentsCount
-                            slug
-                            website
-                            url
-                            createdAt
-                            topics(first: 10) { edges { node { name slug } } }
-                            thumbnail { url }
-                            media { url type videoUrl }
-                            makers { name username }
-                            productLinks { type url }
-                        }
+                        id
+                        name
+                        tagline
+                        description
+                        votesCount
+                        commentsCount
+                        slug
+                        website
+                        url
+                        createdAt
+                        topics(first: 6) { edges { node { name } } }
+                        thumbnail { url }
+                        media { url type }
                     }
+                    cursor
                 }
+                pageInfo { hasNextPage endCursor }
             }
         }
         """
         
+        collected_posts = []
+        cursor = None
+        
         try:
-            data = self._make_request(search_query, {
-                "q": query,
-                "limit": limit
-            })
+            while len(collected_posts) < limit:
+                # Calculate how many posts to fetch in this page
+                remaining = limit - len(collected_posts)
+                current_page_size = min(page_size, remaining)
+                
+                # Prepare variables
+                variables = {
+                    "after": posted_after_iso,
+                    "first": current_page_size,
+                    "cursor": cursor
+                }
+                
+                # Make request
+                data = self._make_request(query, variables)
+                posts_data = data.get("data", {}).get("posts", {})
+                edges = posts_data.get("edges", [])
+                page_info = posts_data.get("pageInfo", {})
+                
+                # Process this page
+                for edge in edges:
+                    if edge.get("node"):
+                        normalized_post = self._normalize_post_data_minimal(edge["node"])
+                        collected_posts.append(normalized_post)
+                
+                # Check if we should continue
+                has_next_page = page_info.get("hasNextPage", False)
+                if not has_next_page or len(edges) == 0:
+                    break
+                
+                # Update cursor for next page
+                cursor = page_info.get("endCursor")
+                if not cursor:
+                    break
             
-            posts_data = data.get("data", {}).get("search", {}).get("edges", [])
-            
-            # Normalize each post
-            normalized_posts = []
-            for edge in posts_data:
-                if edge.get("node"):
-                    normalized_post = self._normalize_post_data(edge["node"])
-                    normalized_posts.append(normalized_post)
-            
-            return normalized_posts
+            return collected_posts
             
         except (ValueError, ConnectionError) as e:
-            print(f"Error searching for '{query}': {str(e)}")
-            return []
+            print(f"Error fetching posts since {posted_after_iso}: {str(e)}")
+            return collected_posts  # Return what we collected so far
+
+    def _normalize_post_data_minimal(self, post: Dict) -> Dict:
+        """
+        Normalize post data to a minimal flat structure for discovery mode.
+        
+        Args:
+            post: Raw post data from GraphQL response
+            
+        Returns:
+            Dict with normalized flat structure
+        """
+        # Extract topics (connection with edges)
+        topics = []
+        if post.get("topics", {}).get("edges"):
+            topics = [
+                edge["node"]["name"] 
+                for edge in post["topics"]["edges"] 
+                if edge.get("node") and edge["node"].get("name")
+            ]
+        
+        # Extract thumbnail URL
+        thumbnail_url = None
+        if post.get("thumbnail", {}).get("url"):
+            thumbnail_url = post["thumbnail"]["url"]
+        
+        # Extract media (plain list)
+        media = post.get("media", []) or []
+        
+        # Return normalized flat structure
+        return {
+            "id": post.get("id"),
+            "name": post.get("name"),
+            "tagline": post.get("tagline"),
+            "description": post.get("description"),
+            "votesCount": post.get("votesCount"),
+            "commentsCount": post.get("commentsCount"),
+            "slug": post.get("slug"),
+            "website": post.get("website"),
+            "url": post.get("url"),
+            "createdAt": post.get("createdAt"),
+            "topics": topics,
+            "thumbnailUrl": thumbnail_url,
+            "media": media
+        }
+
 
     def search_post_tophit(self, query: str) -> Optional[Dict]:
         """

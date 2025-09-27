@@ -207,8 +207,8 @@ async def handle_daily_command(dry_run: bool = False, since: str = None, limit: 
         return False
 
 
-async def handle_discovery_command(dry_run: bool = False, since: str = None, limit: int = 100, 
-                                 query: str = None, top: int = 1, debug: bool = False):
+async def handle_discovery_command(dry_run: bool = False, since: str = None, limit: int = 60, 
+                                 top: int = 1, debug: bool = False):
     """Handle --discover command to find and post best B2B/SMB/Fintech posts."""
     try:
         from datetime import datetime, timedelta
@@ -244,21 +244,10 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
         # Create Product Hunt client
         ph_client = create_ph_client()
         
-        # Fetch posts from time window
-        print(f"📡 Fetching up to {limit} posts from time window...")
-        posts = ph_client.get_posts_since(posted_after_iso, limit)
+        # Fetch posts from time window using paginated method
+        print(f"📡 Fetching up to {limit} posts from time window (paginated)...")
+        posts = ph_client.get_posts_since_paginated(posted_after_iso, limit=limit, page_size=20)
         print(f"✅ Found {len(posts)} posts from time window")
-        
-        # If query provided, also search and merge
-        if query:
-            print(f"🔍 Searching for: '{query}'...")
-            search_posts = ph_client.search_posts(query, limit=30)
-            print(f"✅ Found {len(search_posts)} posts from search")
-            
-            # Merge and deduplicate
-            all_posts = posts + search_posts
-            posts = deduplicate_posts(all_posts)
-            print(f"✅ Total unique posts after deduplication: {len(posts)}")
         
         if not posts:
             print("❌ No posts found")
@@ -275,7 +264,8 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
             print("\n🔍 Debug - All scored posts:")
             for score, post in sorted(scored_posts, key=lambda x: x[0], reverse=True)[:10]:
                 topics_str = ", ".join(post.get("topics", [])[:3])
-                print(f"  {post.get('name', 'Unknown')} | score={score:.1f} | votes={post.get('votesCount', 0)} | topics=[{topics_str}]")
+                created_at = post.get("createdAt", "Unknown")
+                print(f"  {post.get('name', 'Unknown')} | score={score:.1f} | votes={post.get('votesCount', 0)} | topics=[{topics_str}] | createdAt={created_at}")
         
         if not relevant_posts:
             print("❌ No B2B/SMB/fintech candidates today")
@@ -326,6 +316,12 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
         
         if not dry_run:
             print(f"\n🎉 Successfully sent {sent_count} posts")
+        
+        # Final summary
+        print(f"\n📊 Summary:")
+        print(f"  Fetched: {len(posts)} posts")
+        print(f"  Matched (>0 score): {len(relevant_posts)} posts")
+        print(f"  Posted: {sent_count} posts")
         
         return True
         
@@ -384,8 +380,7 @@ Usage:
   python main.py --daily            # Find and post best fintech product from today
   python main.py --discover         # Discover B2B/SMB/Fintech posts (48h window)
   python main.py --since <ISO>      # Override posted_after date (ISO format)
-  python main.py --limit <N>        # Override fetch limit (default 30/100)
-  python main.py --query <query>    # Additional search query for discovery
+  python main.py --limit <N>        # Total candidates cap (default 60)
   python main.py --top <N>          # Number of posts to send (default 1)
   python main.py --debug            # Show debug scoring information
   python main.py --dry-run          # Preview article without sending to Telegram
@@ -396,7 +391,7 @@ Examples:
   python main.py --daily
   python main.py --discover
   python main.py --discover --dry-run
-  python main.py --discover --query "b2b fintech api" --top 3
+  python main.py --discover --top 3
   python main.py --discover --since "2025-09-25T00:00:00Z" --limit 50 --debug
   python main.py --daily --dry-run
 
@@ -416,7 +411,7 @@ async def main():
     parser.add_argument("--daily", action="store_true", help="Find and post best fintech product from today")
     parser.add_argument("--discover", action="store_true", help="Discover B2B/SMB/Fintech posts (48h window)")
     parser.add_argument("--since", help="Override posted_after date (ISO format)")
-    parser.add_argument("--limit", type=int, default=30, help="Override fetch limit (default 30/100)")
+    parser.add_argument("--limit", type=int, default=30, help="Override fetch limit (default 30/60)")
     parser.add_argument("--top", type=int, default=1, help="Number of posts to send (default 1)")
     parser.add_argument("--debug", action="store_true", help="Show debug scoring information")
     parser.add_argument("--dry-run", action="store_true", help="Preview article without sending to Telegram")
@@ -435,12 +430,11 @@ async def main():
         sys.exit(0 if success else 1)
     elif args.discover:
         # For discovery mode, use higher default limit
-        limit = args.limit if args.limit != 30 else 100
+        limit = args.limit if args.limit != 30 else 60
         success = await handle_discovery_command(
             dry_run=args.dry_run,
             since=args.since,
             limit=limit,
-            query=args.query,
             top=args.top,
             debug=args.debug
         )
