@@ -8,28 +8,41 @@ from dateutil import parser
 from typing import List, Dict
 
 
-# B2B/SMB/Fintech focused constants
-B2B_TOPICS = {
-    "Fintech", "Payments", "B2B", "Banking", "Finance", "Accounting", 
-    "HR", "Payroll", "DevTools", "APIs", "SaaS", "Small Business", "SMB"
+# Strict B2B/SMB/Fintech keyword families (lowercase match)
+FIN_CORE = {
+    "fintech", "payments", "payment", "banking", "treasury", "merchant", "pos", 
+    "reconciliation", "open banking", "embedded finance", "issuing", "settlement", 
+    "remittance", "accounts", "iban", "ach", "sepa", "b2b", "smb", "sme", "small business"
 }
 
-B2B_KEYWORDS = [
-    "b2b", "smb", "small business", "merchant", "pos", "erp", "saas", "api", "platform",
-    "fintech", "payments", "invoice", "invoicing", "billing", "payroll", "benefits",
-    "accounting", "tax", "kyc", "aml", "compliance", "lending", "credit", "issuing", "reconciliation"
-]
+LENDING = {
+    "lending", "credit", "bnpl", "invoice financing", "factoring", "working capital"
+}
+
+PAYROLL = {
+    "payroll", "salary", "salaries", "benefits", "tax", "withholding", "w2", 
+    "w-2", "1099", "hr", "employee", "employees", "compensation", "paystub"
+}
+
+ACCOUNT = {
+    "accounting", "bookkeeping", "invoicing", "invoice", "billing", "ar", "ap", 
+    "ledger", "erp", "reporting"
+}
+
+# Business size keywords for additional scoring
+BUSINESS_SIZE = {"b2b", "smb", "sme", "small business"}
 
 
 def relevance_score(post: Dict) -> float:
     """
-    Calculate relevance score for a B2B/SMB/Fintech post.
+    Calculate relevance score for a B2B/SMB/Fintech post with strict filtering.
+    Returns 0 if no keyword families match (no fallback to non-fintech/B2B).
     
     Args:
         post: Product Hunt post dictionary
         
     Returns:
-        float: Relevance score (higher = more relevant)
+        float: Relevance score (0 if not fintech/B2B relevant)
     """
     text = (post.get("name", "") + " " + post.get("tagline", "") + " " + post.get("description", "")).lower()
     topics = {t.lower() for t in (post.get("topics") or [])}
@@ -42,24 +55,62 @@ def relevance_score(post: Dict) -> float:
     except (ValueError, TypeError):
         age_days = 0.0
     
-    # Score components
+    # Strict scoring - start with 0
     score = 0.0
     
-    # Topic matching (30 points)
-    if topics & {t.lower() for t in B2B_TOPICS}:
+    # Check keyword families (all text + topics)
+    all_text = text + " " + " ".join(topics)
+    
+    # Core fintech keywords (30 points)
+    if any(k in all_text for k in FIN_CORE):
         score += 30
     
-    # Keyword matching (25 points)
-    if any(k in text for k in B2B_KEYWORDS):
-        score += 25
+    # Lending keywords (20 points)
+    if any(k in all_text for k in LENDING):
+        score += 20
     
-    # Engagement bonus
-    score += 0.04 * votes + 0.1 * comments
+    # Payroll keywords (20 points)
+    if any(k in all_text for k in PAYROLL):
+        score += 20
+    
+    # Accounting keywords (18 points)
+    if any(k in all_text for k in ACCOUNT):
+        score += 18
+    
+    # Business size bonus (10 points)
+    if any(k in all_text for k in BUSINESS_SIZE):
+        score += 10
+    
+    # If no keyword families match, return 0 (no fallback)
+    if score == 0:
+        return 0.0
+    
+    # Engagement bonus (only if already relevant)
+    score += 0.04 * votes + 0.08 * comments
     
     # Freshness decay (tau ≈ 5 days)
     score *= math.exp(-age_days / 5.0)
     
     return score
+
+
+def debug_candidate(post: Dict) -> str:
+    """
+    Generate debug string for a candidate post.
+    
+    Args:
+        post: Product Hunt post dictionary
+        
+    Returns:
+        str: Debug string in format "[DBG] name=... score=... votes=... topics=..."
+    """
+    name = post.get("name", "Unknown")
+    score = relevance_score(post)
+    votes = post.get("votesCount", 0)
+    topics = post.get("topics", [])[:4]  # First 4 topics
+    topics_str = ", ".join(topics) if topics else "None"
+    
+    return f"[DBG] name={name} score={score:.2f} votes={votes} topics={topics_str}"
 
 
 def pick_top_b2b(candidates: List[Dict], k: int = 1) -> List[Dict]:

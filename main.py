@@ -22,7 +22,7 @@ from fintech_radar_bot.bot import send_test_message, FintechRadarBot
 from fintech_radar_bot.ph_client import create_ph_client
 from fintech_radar_bot.data_collector import pick_best_fintech, score_candidate
 from fintech_radar_bot.state import load_posted_ids, add_posted_id
-from fintech_radar_bot.discovery import pick_top_b2b, relevance_score, deduplicate_posts
+from fintech_radar_bot.discovery import pick_top_b2b, relevance_score, deduplicate_posts, debug_candidate
 
 
 async def handle_slug_command(slug: str, dry_run: bool = False):
@@ -253,23 +253,22 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
             print("❌ No posts found")
             return False
         
-        # Score and filter for B2B relevance
-        print("🎯 Scoring posts for B2B/SMB/Fintech relevance...")
+        # Score and filter for B2B relevance with strict filtering
+        print("🎯 Scoring posts for B2B/SMB/Fintech relevance (strict filtering)...")
         scored_posts = [(relevance_score(p), p) for p in posts]
         relevant_posts = [p for score, p in scored_posts if score > 0]
         
         print(f"📊 {len(relevant_posts)} posts scored > 0 (relevant)")
         
         if debug:
-            print("\n🔍 Debug - All scored posts:")
-            for score, post in sorted(scored_posts, key=lambda x: x[0], reverse=True)[:10]:
-                topics_str = ", ".join(post.get("topics", [])[:3])
-                created_at = post.get("createdAt", "Unknown")
-                print(f"  {post.get('name', 'Unknown')} | score={score:.1f} | votes={post.get('votesCount', 0)} | topics=[{topics_str}] | createdAt={created_at}")
+            print("\n🔍 Debug - All candidates:")
+            for post in posts:
+                print(f"  {debug_candidate(post)}")
         
+        # Strict filtering - if no relevant posts, exit without posting anything
         if not relevant_posts:
-            print("❌ No B2B/SMB/fintech candidates today")
-            return True  # Exit 0 - no fallback to general posts
+            print("❌ No B2B/fintech candidates today.")
+            return True  # Exit 0 - DO NOT post anything
         
         # Pick top N posts
         top_posts = pick_top_b2b(posts, k=top)
@@ -282,6 +281,11 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
         for i, post in enumerate(top_posts, 1):
             score = relevance_score(post)
             print(f"  {i}. {post.get('name', 'Unknown')} (score: {score:.1f}, votes: {post.get('votesCount', 0)})")
+        
+        # Log which one was picked
+        if top_posts:
+            picked_post = top_posts[0]
+            print(f"📌 Picked: {picked_post.get('name', 'Unknown')} (score: {relevance_score(picked_post):.1f})")
         
         # Check posted IDs and send posts
         posted_ids = load_posted_ids()
@@ -303,7 +307,7 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
                 print(f"\n📄 DRY RUN - Article for: {post.get('name', 'Unknown')}")
                 success = await bot.send_article_to_telegram(post, dry_run=True)
                 if success:
-                    print("✅ Dry run successful")
+                    print("✅ Dry run successful - article text printed above")
             else:
                 print(f"\n📤 Sending: {post.get('name', 'Unknown')}")
                 success = await bot.send_article_to_telegram(post, dry_run=False)
@@ -321,6 +325,9 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
         print(f"\n📊 Summary:")
         print(f"  Fetched: {len(posts)} posts")
         print(f"  Matched (>0 score): {len(relevant_posts)} posts")
+        if top_posts:
+            picked_name = top_posts[0].get('name', 'Unknown')
+            print(f"  Picked: {picked_name}")
         print(f"  Posted: {sent_count} posts")
         
         return True
