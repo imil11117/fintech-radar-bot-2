@@ -3,9 +3,13 @@ B2B/SMB/Fintech discovery module for finding relevant posts.
 """
 
 import math
+import os
+import random
 from datetime import datetime, timezone
 from dateutil import parser
-from typing import List, Dict
+from typing import List, Dict, Optional
+
+from .finance_subcats import topic_hits_finance_subcat, FINANCE_SUBCATS
 
 
 # Strict B2B/SMB/Fintech keyword families (lowercase match)
@@ -223,3 +227,75 @@ def deduplicate_posts(posts: List[Dict]) -> List[Dict]:
             unique_posts.append(post)
     
     return unique_posts
+
+
+def filter_finance_subcats(posts: List[Dict]) -> List[Dict]:
+    """
+    Keep only posts whose topics intersect our finance subcategory whitelist.
+    
+    Args:
+        posts: List of Product Hunt post dictionaries
+        
+    Returns:
+        List of posts that match finance subcategories
+    """
+    keep = []
+    for p in posts:
+        topics = p.get("topics") or []
+        hit, matched = topic_hits_finance_subcat(topics)
+        if hit:
+            p["_matched_subcats"] = matched  # for debugging / logging
+            keep.append(p)
+    return keep
+
+
+def pick_random(posts: List[Dict]) -> Optional[Dict]:
+    """
+    Pick a random post from the list.
+    
+    Args:
+        posts: List of Product Hunt post dictionaries
+        
+    Returns:
+        Random post or None if list is empty
+    """
+    return random.choice(posts) if posts else None
+
+
+def pick_round_robin(posts: List[Dict], subcat_order: List[str], state_path: str = ".state/last_subcat.txt") -> Optional[Dict]:
+    """
+    Rotate over subcategories in `subcat_order` and pick the first post that matches the next subcat.
+    Store/read last used subcat in `.state/last_subcat.txt`.
+    
+    Args:
+        posts: List of Product Hunt post dictionaries
+        subcat_order: List of subcategories in preferred order
+        state_path: Path to store last used subcategory
+        
+    Returns:
+        Post matching the next subcategory in rotation, or None if no match
+    """
+    last = None
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                last = f.read().strip()
+        except (IOError, OSError):
+            last = None
+    
+    order = subcat_order[:]
+    start_idx = (order.index(last) + 1) % len(order) if (last in order) else 0
+
+    # Try from next subcat onward, then wrap
+    for i in range(len(order)):
+        sub = order[(start_idx + i) % len(order)]
+        for p in posts:
+            if any(s == sub for s in p.get("_matched_subcats", [])):
+                try:
+                    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        f.write(sub)
+                except (IOError, OSError):
+                    pass  # Continue even if we can't save state
+                return p
+    return None

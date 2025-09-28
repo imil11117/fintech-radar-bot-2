@@ -10,6 +10,8 @@ A Telegram bot that posts daily fintech industry updates to a designated channel
 - ⚖️ **Regulatory Updates**: Policy changes and regulatory news
 - ⏰ **Automated Scheduling**: Configurable daily posting times
 - 🔧 **Extensible Architecture**: Easy to add new data sources
+- 🎯 **Product Hunt Integration**: Find and post fintech products from Product Hunt
+- 💸 **Finance Subcategories**: Whitelisted finance topic filtering with round-robin selection
 
 ## Project Structure
 
@@ -23,7 +25,11 @@ fintech-radar-bot/
 │       ├── data_collector.py   # Data collection logic
 │       ├── message_formatter.py # Message formatting
 │       ├── scheduler.py        # Task scheduling
-│       └── utils.py            # Utility functions
+│       ├── utils.py            # Utility functions
+│       ├── ph_client.py        # Product Hunt API client
+│       ├── discovery.py        # B2B/Fintech discovery logic
+│       ├── finance_subcats.py  # Finance subcategories whitelist
+│       └── state.py            # State management for deduplication
 ├── config/                     # Configuration files
 ├── tests/                      # Test files
 ├── docs/                       # Documentation
@@ -43,6 +49,7 @@ fintech-radar-bot/
 - Python 3.8 or higher
 - A Telegram bot token (get one from [@BotFather](https://t.me/botfather))
 - A Telegram channel where the bot will post updates
+- A Product Hunt API token (optional, for Product Hunt integration)
 
 ### Setup
 
@@ -85,9 +92,10 @@ CHANNEL_ID=@your_channel_username_or_channel_id
 
 # Optional
 POST_TIME=09:00
-TIMEZONE=UTC
+TIMEZONE=America/Mexico_City
 LOG_LEVEL=INFO
 MAX_ARTICLES_PER_UPDATE=5
+PRODUCTHUNT_TOKEN=your_producthunt_token_here
 ```
 
 ### Environment Variables
@@ -97,11 +105,12 @@ MAX_ARTICLES_PER_UPDATE=5
 | `BOT_TOKEN` | Yes | - | Telegram bot token from @BotFather |
 | `CHANNEL_ID` | Yes | - | Channel username or ID where bot posts |
 | `POST_TIME` | No | 09:00 | Daily post time (24h format) |
-| `TIMEZONE` | No | UTC | Timezone for scheduling |
+| `TIMEZONE` | No | America/Mexico_City | Timezone for scheduling |
 | `LOG_LEVEL` | No | INFO | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `API_BASE_URL` | No | - | Base URL for external APIs |
 | `API_KEY` | No | - | API key for external services |
 | `MAX_ARTICLES_PER_UPDATE` | No | 5 | Maximum articles per daily update |
+| `PRODUCTHUNT_TOKEN` | No | - | Product Hunt API token for product discovery |
 
 ## Usage
 
@@ -136,6 +145,89 @@ This will:
 - Test data collection
 - Test message formatting
 - Optionally send a test message
+
+### Product Hunt Integration
+
+The bot supports several Product Hunt integration commands:
+
+#### Basic Commands
+
+1. **Fetch a specific product by slug:**
+   ```bash
+   python main.py --slug gusto
+   ```
+
+2. **Search for a product:**
+   ```bash
+   python main.py --query "fintech app"
+   ```
+
+3. **Find best fintech product from today:**
+   ```bash
+   python main.py --daily
+   ```
+
+#### Discovery Commands
+
+4. **Discover B2B/SMB/Fintech posts (48h window):**
+   ```bash
+   python main.py --discover
+   python main.py --discover --dry-run
+   python main.py --discover --top 3
+   python main.py --discover --since "2025-09-25T00:00:00Z" --limit 50 --debug
+   ```
+
+5. **Finance Subcategories Picker (NEW):**
+   ```bash
+   # Dry run for last 48h
+   python main.py --finance-subcats --dry-run --debug
+   
+   # Wider time window
+   python main.py --finance-subcats --since "2025-09-24T00:00:00Z" --limit 60 --dry-run --debug
+   
+   # Real post with round-robin selection
+   python main.py --finance-subcats --choose rr
+   
+   # Random selection
+   python main.py --finance-subcats --choose random
+   ```
+
+#### Command Options
+
+- `--dry-run`: Preview article without sending to Telegram
+- `--since ISO`: Override posted_after date (ISO format)
+- `--limit N`: Total candidates cap (default 30/60)
+- `--top N`: Number of posts to send (default 1)
+- `--choose {random,rr}`: Selection strategy (default: rr)
+- `--debug`: Show debug scoring information
+
+#### Finance Subcategories
+
+The finance subcategories picker uses a whitelist of 19 finance-related topics:
+
+- Accounting software
+- Budgeting apps
+- Credit score tools
+- Financial planning
+- Fundraising resources
+- Investing
+- Invoicing tools
+- Money transfer
+- Neobanks
+- Online banking
+- Payroll software
+- Remote workforce tools
+- Retirement planning
+- Savings apps
+- Startup financial planning
+- Startup incorporation
+- Stock trading platforms
+- Tax preparation
+- Treasury management platforms
+
+The picker supports two selection strategies:
+- **Round-robin (default)**: Rotates through subcategories to ensure variety
+- **Random**: Randomly selects from matching posts
 
 ## Development
 

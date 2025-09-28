@@ -22,7 +22,8 @@ from fintech_radar_bot.bot import send_test_message, FintechRadarBot
 from fintech_radar_bot.ph_client import create_ph_client
 from fintech_radar_bot.data_collector import pick_best_fintech, score_candidate
 from fintech_radar_bot.state import load_posted_ids, add_posted_id
-from fintech_radar_bot.discovery import pick_top_b2b, relevance_score, deduplicate_posts, debug_candidate
+from fintech_radar_bot.discovery import pick_top_b2b, relevance_score, deduplicate_posts, debug_candidate, filter_finance_subcats, pick_random, pick_round_robin
+from fintech_radar_bot.finance_subcats import FINANCE_SUBCATS
 
 
 async def handle_slug_command(slug: str, dry_run: bool = False):
@@ -343,6 +344,114 @@ async def handle_discovery_command(dry_run: bool = False, since: str = None, lim
         return False
 
 
+async def handle_finance_subcats_command(dry_run: bool = False, since: str = None, limit: int = 60, 
+                                       choose: str = "rr", debug: bool = False):
+    """Handle --finance-subcats command to find and post finance subcategory posts."""
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        
+        # Setup
+        ensure_directories()
+        setup_logging(config.LOG_LEVEL, config.LOG_FILE)
+        load_env_file()
+        
+        # Get timezone from environment (default: America/Mexico_City)
+        timezone_str = os.getenv("TIMEZONE", "America/Mexico_City")
+        try:
+            tz = pytz.timezone(timezone_str)
+        except pytz.exceptions.UnknownTimeZoneError:
+            print(f"❌ Unknown timezone: {timezone_str}. Using UTC.")
+            tz = pytz.UTC
+        
+        # Compute posted_after_iso (if --since given, use it; else local midnight minus 48h in TIMEZONE → convert to UTC ISO)
+        if since:
+            posted_after_iso = since
+            print(f"🔍 Using custom since date: {since}")
+        else:
+            # Local midnight minus 48h (two-day window)
+            now_local = datetime.now(tz)
+            midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            two_days_ago = midnight_local - timedelta(days=2)
+            # Convert to UTC
+            two_days_ago_utc = two_days_ago.astimezone(pytz.UTC)
+            posted_after_iso = two_days_ago_utc.isoformat().replace('+00:00', 'Z')
+            print(f"🔍 Fetching posts since 48h ago: {posted_after_iso}")
+        
+        # Create Product Hunt client
+        ph_client = create_ph_client()
+        
+        # Fetch posts from time window using paginated method
+        print(f"📡 Fetching up to {limit} posts from time window (paginated)...")
+        posts = ph_client.get_posts_since_paginated(posted_after_iso, limit=limit, page_size=20)
+        print(f"✅ Found {len(posts)} posts from time window")
+        
+        if not posts:
+            print("❌ No posts found")
+            return False
+        
+        # Filter for finance subcategories
+        print("🎯 Filtering posts for finance subcategories...")
+        filtered = filter_finance_subcats(posts)
+        print(f"📊 {len(filtered)} posts match finance subcategories")
+        
+        if debug:
+            print("\n🔍 Debug - Finance subcategory candidates:")
+            for p in filtered:
+                topics_str = ", ".join(p.get("topics", [])[:5])
+                matched_str = ", ".join(p.get("_matched_subcats", []))
+                print(f"  [DBG] {p['name']} | topics={topics_str} | matched={matched_str}")
+        
+        # De-dup with posted_ids
+        posted_ids = load_posted_ids()
+        filtered = [p for p in filtered if p.get("id") not in posted_ids]
+        print(f"📊 {len(filtered)} posts after de-duplication")
+        
+        if not filtered:
+            print("No candidates in Finance subcategories for this window.")
+            return True
+        
+        # Pick using selection strategy
+        if choose == "rr":
+            pick = pick_round_robin(filtered, subcat_order=FINANCE_SUBCATS)
+        else:
+            pick = pick_random(filtered)
+        
+        if not pick:
+            print("No candidates in Finance subcategories for this window.")
+            return True
+        
+        print(f"🏆 Selected: {pick.get('name', 'Unknown')}")
+        print(f"   Matched subcategories: {', '.join(pick.get('_matched_subcats', []))}")
+        print(f"   Votes: {pick.get('votesCount', 0)}")
+        print(f"   Website: {pick.get('website', 'N/A')}")
+        
+        # Create bot and send article
+        bot = FintechRadarBot()
+        success = await bot.send_article_to_telegram(pick, dry_run=dry_run, mode="finance-subcats")
+        
+        if success and not dry_run:
+            # Mark as posted
+            add_posted_id(pick["id"])
+            print(f"✅ Successfully posted and marked product {pick['id']} as posted")
+        elif success and dry_run:
+            print("✅ Dry run completed successfully")
+        else:
+            print("❌ Failed to send article")
+        
+        return success
+        
+    except ValueError as e:
+        if "PRODUCTHUNT_TOKEN" in str(e):
+            print("❌ Product Hunt token error. Please check your PRODUCTHUNT_TOKEN in .env file.")
+        else:
+            print(f"❌ Error: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return False
+
+
 async def run_bot():
     """Run the main bot scheduler."""
     try:
@@ -386,9 +495,11 @@ Usage:
   python main.py --query <query>    # Search for product and send top hit to Telegram
   python main.py --daily            # Find and post best fintech product from today
   python main.py --discover         # Discover B2B/SMB/Fintech posts (48h window)
+  python main.py --finance-subcats  # Finance subcategories picker (whitelisted topics)
   python main.py --since <ISO>      # Override posted_after date (ISO format)
   python main.py --limit <N>        # Total candidates cap (default 60)
   python main.py --top <N>          # Number of posts to send (default 1)
+  python main.py --choose {random,rr} # Selection strategy: random or round-robin (default: rr)
   python main.py --debug            # Show debug scoring information
   python main.py --dry-run          # Preview article without sending to Telegram
 
@@ -401,6 +512,9 @@ Examples:
   python main.py --discover --top 3
   python main.py --discover --since "2025-09-25T00:00:00Z" --limit 50 --debug
   python main.py --daily --dry-run
+  python main.py --finance-subcats --dry-run --debug
+  python main.py --finance-subcats --since "2025-09-24T00:00:00Z" --limit 60 --dry-run --debug
+  python main.py --finance-subcats --choose rr
 
 Environment Variables Required:
   TELEGRAM_BOT_TOKEN    - Your Telegram bot token
@@ -417,9 +531,11 @@ async def main():
     parser.add_argument("--query", help="Search for product and send top hit to Telegram")
     parser.add_argument("--daily", action="store_true", help="Find and post best fintech product from today")
     parser.add_argument("--discover", action="store_true", help="Discover B2B/SMB/Fintech posts (48h window)")
+    parser.add_argument("--finance-subcats", action="store_true", help="Finance subcategories picker (whitelisted topics)")
     parser.add_argument("--since", help="Override posted_after date (ISO format)")
     parser.add_argument("--limit", type=int, default=30, help="Override fetch limit (default 30/60)")
     parser.add_argument("--top", type=int, default=1, help="Number of posts to send (default 1)")
+    parser.add_argument("--choose", choices=["random", "rr"], default="rr", help="Selection strategy: random or round-robin (default: rr)")
     parser.add_argument("--debug", action="store_true", help="Show debug scoring information")
     parser.add_argument("--dry-run", action="store_true", help="Preview article without sending to Telegram")
     
@@ -446,8 +562,19 @@ async def main():
             debug=args.debug
         )
         sys.exit(0 if success else 1)
+    elif args.finance_subcats:
+        # For finance subcats mode, use higher default limit
+        limit = args.limit if args.limit != 30 else 60
+        success = await handle_finance_subcats_command(
+            dry_run=args.dry_run,
+            since=args.since,
+            limit=limit,
+            choose=args.choose,
+            debug=args.debug
+        )
+        sys.exit(0 if success else 1)
     elif args.dry_run:
-        print("❌ --dry-run must be used with --slug, --query, --daily, --discover, or --since")
+        print("❌ --dry-run must be used with --slug, --query, --daily, --discover, --finance-subcats, or --since")
         print_usage()
         sys.exit(1)
     else:

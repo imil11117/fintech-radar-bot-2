@@ -146,12 +146,13 @@ class MessageFormatter:
             return f"${amount:.0f} {currency}"
 
 
-def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional[str]]:
+def compose_article_ru(post: Dict, mode: str = "default") -> Tuple[str, List[Tuple[str, str]], Optional[str]]:
     """
     Compose a Russian article for a Product Hunt post.
     
     Args:
         post: Product Hunt post data dictionary
+        mode: Article mode ("default", "finance-subcats")
         
     Returns:
         Tuple of (article_text, buttons, photo_url)
@@ -209,10 +210,22 @@ def compose_article_ru(post: Dict) -> Tuple[str, List[Tuple[str, str]], Optional
     
     
     # Build the article
+    if mode == "finance-subcats":
+        # Get first matched subcategory for the title
+        matched_subcats = post.get("_matched_subcats", [])
+        if matched_subcats:
+            title_prefix = f"💸 {matched_subcats[0]} — "
+        else:
+            title_prefix = "💸 Finance — "
+        header = "🧭 Fintech Radar — Finance Subcategories"
+    else:
+        title_prefix = ""
+        header = "🧭 Fintech Radar — продукт дня"
+    
     article_parts = [
-        "🧭 Fintech Radar — продукт дня",
+        header,
         "",
-        f"🏷️ {name} — {tagline}",
+        f"🏷️ {title_prefix}{name} — {tagline}",
         f"Темы: {topics_joined}",
         "",
         "Что это:",

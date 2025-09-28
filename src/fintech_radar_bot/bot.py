@@ -105,20 +105,21 @@ class FintechRadarBot:
             logger.error(f"Failed to send test message: {e}")
             return False
     
-    async def send_article_to_telegram(self, post: Dict, dry_run: bool = False) -> bool:
+    async def send_article_to_telegram(self, post: Dict, dry_run: bool = False, mode: str = "default") -> bool:
         """
         Send a Product Hunt article to Telegram.
         
         Args:
             post: Product Hunt post data dictionary
             dry_run: If True, only print the article without sending to Telegram
+            mode: Article mode ("default", "finance-subcats")
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
             # Compose the article
-            article_text, buttons, photo_url = compose_article_ru(post)
+            article_text, buttons, photo_url = compose_article_ru(post, mode=mode)
             
             if dry_run:
                 print("=" * 50)
