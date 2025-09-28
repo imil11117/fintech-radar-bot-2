@@ -10,9 +10,11 @@ from typing import List, Dict
 
 # Strict B2B/SMB/Fintech keyword families (lowercase match)
 FIN_CORE = {
-    "fintech", "payments", "payment", "banking", "treasury", "merchant", "pos", 
-    "reconciliation", "open banking", "embedded finance", "issuing", "settlement", 
-    "remittance", "accounts", "iban", "ach", "sepa", "b2b", "smb", "sme", "small business"
+    "fintech", "payments", "payment", "payment processing", "banking", "treasury", "merchant", "pos", 
+    "reconciliation", "open banking", "embedded finance", "issuing", "card issuing", "issuer processing", 
+    "issuing processor", "settlement", "remittance", "accounts", "iban", "ach", "sepa", 
+    "corporate card", "virtual card", "spend management", "expense management",
+    "b2b", "smb", "sme", "small business"
 }
 
 LENDING = {
@@ -30,7 +32,19 @@ ACCOUNT = {
 }
 
 # Business size keywords for additional scoring
-BUSINESS_SIZE = {"b2b", "smb", "sme", "small business"}
+BUSINESS_SIZE = {"b2b", "smb", "sme", "small business", "corporate"}
+
+# Exclusion lists to avoid false positives
+EXCLUDE_TOPICS = {"games", "gaming", "card games", "pokemon", "entertainment", "nft", "collectibles"}
+EXCLUDE_WORDS = {"pokemon", "tcg", "trading card", "collectible", "gaming"}
+
+# Finance phrases for co-occurrence gate
+FINANCE_PHRASES = {
+    "payments", "payment processing", "invoicing", "treasury", "open banking", "embedded finance",
+    "issuing", "card issuing", "corporate card", "virtual card", "settlement", "remittance",
+    "iban", "ach", "sepa", "invoice financing", "factoring", "payroll", "salary", "benefits",
+    "accounting", "ledger", "tax"
+}
 
 
 def relevance_score(post: Dict) -> float:
@@ -45,7 +59,7 @@ def relevance_score(post: Dict) -> float:
         float: Relevance score (0 if not fintech/B2B relevant)
     """
     text = (post.get("name", "") + " " + post.get("tagline", "") + " " + post.get("description", "")).lower()
-    topics = {t.lower() for t in (post.get("topics") or [])}
+    topics = [t.lower() for t in (post.get("topics") or [])]
     votes = post.get("votesCount") or 0
     comments = post.get("commentsCount") or 0
     
@@ -55,11 +69,41 @@ def relevance_score(post: Dict) -> float:
     except (ValueError, TypeError):
         age_days = 0.0
     
+    # EXCLUSION CHECKS - early return if excluded
+    # Check for excluded words in name+tagline+description
+    if any(excl in text for excl in EXCLUDE_WORDS):
+        return 0.0
+    
+    # Check for excluded topics
+    if any(t in EXCLUDE_TOPICS for t in topics):
+        return 0.0
+    
+    # CO-OCCURRENCE FINANCE GATE
+    # Require at least ONE of these conditions:
+    # A) Contains a finance phrase
+    # B) Has SMB/B2B context AND one of PAYROLL/LENDING/ACCOUNT hits
+    all_text = text + " " + " ".join(topics)
+    
+    # Check A: Finance phrases
+    has_finance_phrase = any(phrase in all_text for phrase in FINANCE_PHRASES)
+    
+    # Check B: SMB/B2B context + PAYROLL/LENDING/ACCOUNT
+    has_business_context = any(k in all_text for k in BUSINESS_SIZE)
+    has_payroll_lending_account = (
+        any(k in all_text for k in PAYROLL) or
+        any(k in all_text for k in LENDING) or
+        any(k in all_text for k in ACCOUNT)
+    )
+    has_business_finance = has_business_context and has_payroll_lending_account
+    
+    # Finance gate: must have either A or B
+    finance_gate = has_finance_phrase or has_business_finance
+    
+    if not finance_gate:
+        return 0.0
+    
     # Strict scoring - start with 0
     score = 0.0
-    
-    # Check keyword families (all text + topics)
-    all_text = text + " " + " ".join(topics)
     
     # Core fintech keywords (30 points)
     if any(k in all_text for k in FIN_CORE):
@@ -96,21 +140,37 @@ def relevance_score(post: Dict) -> float:
 
 def debug_candidate(post: Dict) -> str:
     """
-    Generate debug string for a candidate post.
+    Generate debug string for a candidate post showing which rules fired.
     
     Args:
         post: Product Hunt post dictionary
         
     Returns:
-        str: Debug string in format "[DBG] name=... score=... votes=... topics=..."
+        str: Debug string in format "[DBG] gate=... excl=... name=... topics=... score=..."
     """
     name = post.get("name", "Unknown")
-    score = relevance_score(post)
-    votes = post.get("votesCount", 0)
-    topics = post.get("topics", [])[:4]  # First 4 topics
-    topics_str = ", ".join(topics) if topics else "None"
+    text = (post.get("name", "") + " " + post.get("tagline", "") + " " + post.get("description", "")).lower()
+    topics = [t.lower() for t in (post.get("topics") or [])]
+    all_text = text + " " + " ".join(topics)
     
-    return f"[DBG] name={name} score={score:.2f} votes={votes} topics={topics_str}"
+    # Check exclusion
+    excl_hit = any(excl in text for excl in EXCLUDE_WORDS) or any(t in EXCLUDE_TOPICS for t in topics)
+    
+    # Check finance gate
+    has_finance_phrase = any(phrase in all_text for phrase in FINANCE_PHRASES)
+    has_business_context = any(k in all_text for k in BUSINESS_SIZE)
+    has_payroll_lending_account = (
+        any(k in all_text for k in PAYROLL) or
+        any(k in all_text for k in LENDING) or
+        any(k in all_text for k in ACCOUNT)
+    )
+    has_business_finance = has_business_context and has_payroll_lending_account
+    finance_gate = has_finance_phrase or has_business_finance
+    
+    score = relevance_score(post)
+    topics_str = ", ".join(topics[:3]) if topics else "None"
+    
+    return f"[DBG] gate={finance_gate} excl={excl_hit} name={name} topics={topics_str} score={score:.2f}"
 
 
 def pick_top_b2b(candidates: List[Dict], k: int = 1) -> List[Dict]:
