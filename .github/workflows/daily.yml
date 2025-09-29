@@ -1,0 +1,32 @@
+name: Daily Fintech Radar
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 15 * * *'  # 09:00 America/Mexico_City
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PH_TOKEN: ${{ secrets.PRODUCTHUNT_TOKEN }}
+        run: python3 main.py --finance-subcats --choose rr
+
+      - name: Print completion time
+        run: date -u
