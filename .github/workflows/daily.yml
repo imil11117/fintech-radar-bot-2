@@ -3,7 +3,7 @@ name: Daily Fintech Radar
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'  # 09:00 America/Mexico_City
+    - cron: '0 15 * * *'  # 09:00 America/Mexico_City (15:00 UTC)
 
 jobs:
   run-bot:
@@ -20,6 +20,35 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Debug: show environment & workspace
+        run: |
+          echo "Current directory: $(pwd)"
+          python3 --version
+          pip --version
+          echo "Top-level files:"
+          ls -l
+          if [ ! -f requirements.txt ]; then
+            echo "requirements.txt not found!" >&2
+            exit 1
+          fi
+          if [ ! -f main.py ]; then
+            echo "main.py not found!" >&2
+            exit 1
+          fi
+
+      - name: Debug: check secrets presence (masked)
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PH_TOKEN: ${{ secrets.PRODUCTHUNT_TOKEN }}
+        run: |
+          echo -n "TG_TOKEN: "
+          if [ -n "$TG_TOKEN" ]; then echo "YES"; else echo; fi
+          echo -n "TG_CHAT_ID: "
+          if [ -n "$TG_CHAT_ID" ]; then echo "YES"; else echo; fi
+          echo -n "PH_TOKEN: "
+          if [ -n "$PH_TOKEN" ]; then echo "YES"; else echo; fi
 
       - name: Run bot
         env:
